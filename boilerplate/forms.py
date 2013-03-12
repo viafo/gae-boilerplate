@@ -78,6 +78,16 @@ class RegisterMobileForm(PasswordMixin, UserMixin):
     email = fields.TextField(_('Email'), [validators.Required(), validators.Length(min=7, max=FIELD_MAXLENGTH), validators.regexp(utils.EMAIL_REGEXP, message=_('Invalid email address.'))])
     pass
 
+class InviteUserForm(BaseForm):
+    username = fields.TextField(_('Username'), [validators.Required(), validators.Length(max=FIELD_MAXLENGTH), validators.regexp(utils.ALPHANUMERIC_REGEXP, message=_('Username invalid. Use only letters and numbers.'))])
+    email = fields.TextField(_('Email'), [validators.Required(), validators.Length(min=7, max=FIELD_MAXLENGTH), validators.regexp(utils.EMAIL_REGEXP, message=_('Invalid email address.'))])
+    pass
+
+class InviteActivateForm(PasswordMixin, ConfirmPasswordMixin):
+    name = fields.TextField(_('Name'), [validators.Length(max=FIELD_MAXLENGTH)])
+    last_name = fields.TextField(_('Last Name'), [validators.Length(max=FIELD_MAXLENGTH)])
+    country = fields.SelectField(_('Country'), choices=utils.COUNTRIES)
+    pass
 
 class EditProfileForm(UserMixin):
     pass

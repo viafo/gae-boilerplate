@@ -906,16 +906,42 @@ class AccountActivationHandler(BaseHandler):
             return self.redirect_to('home')
 
 
-class InviteUser(RegisterBaseHandler):
+class InviteUser(BaseHandler):
     """
     Handler for Inviting New users
     """
 
+    def send_invite_email(self, user_info, username, email):
+        # send email
+        subject =  _("%s Account Verification" % self.app.config.get('app_name'))
+        confirmation_url = self.uri_for("account-activation-invite",
+            user_id=user_info.get_id(),
+            token = models.User.create_auth_token(user_info.get_id()),
+            _full = True)
+
+        # load email's template
+        template_val = {
+            "app_name": self.app.config.get('app_name'),
+            "username": username,
+            "confirmation_url": confirmation_url,
+            "support_url": self.uri_for("contact", _full=True)
+        }
+        body_path = "emails/account_invite.txt"
+        body = self.jinja2.render_template(body_path, **template_val)
+
+        email_url = self.uri_for('taskqueue-send-email')
+        taskqueue.add(url = email_url, params={
+            'to': str(email),
+            'subject' : subject,
+            'body' : body,
+            })
+
     def get(self):
         """ Returns a simple HTML form for create a new user """
 
-        if self.user:
-            self.redirect_to('home')
+        if not self.user:
+            return self.redirect_to('home')
+
         params = {}
         return self.render_template('invite.html', **params)
 
@@ -923,21 +949,30 @@ class InviteUser(RegisterBaseHandler):
         """ Get fields from POST dict """
 
         if not self.form.validate():
+            logging.info("Form failed validation")
             return self.get()
         username = self.form.username.data.lower()
-        name = self.form.name.data.strip()
-        last_name = self.form.last_name.data.strip()
         email = self.form.email.data.lower()
 
         unique_properties = ['username', 'email']
         auth_id = "own:%s" % username
         user = self.auth.store.user_model.create_user(
             auth_id, unique_properties, 
-            username=username, name=name, last_name=last_name, email=email,
+            username=username, email=email,
             ip=self.request.remote_addr
         )
 
         if not user[0]: #user is a tuple
+            if "username" in str(user[1]) or "email" in str(user[1]):
+                user_info = models.User.get_by_email(email)
+                if user_info and (user_info.activated == False) and user_info.username == username:
+                    # Re-send the invite
+                    self.send_invite_email(user_info, username, email)
+                    message = _('User invite re-sent. '
+                                'They should check their email to activate their account.')
+                    self.add_message(message, 'success')
+                    return self.redirect_to('home')
+
             if "username" in str(user[1]):
                 message = _('Sorry, The username %s is already registered.' % '<strong>{0:>s}</strong>'.format(username) )
             elif "email" in str(user[1]):
@@ -952,32 +987,9 @@ class InviteUser(RegisterBaseHandler):
             try:
                 user_info = models.User.get_by_email(email)
                 if (user_info.activated == False):
-                    # send email
-                    subject =  _("%s Account Verification" % self.app.config.get('app_name'))
-                    confirmation_url = self.uri_for("account-activation-invite",
-                        user_id=user_info.get_id(),
-                        token = models.User.create_auth_token(user_info.get_id()),
-                        _full = True)
-
-                    # load email's template
-                    template_val = {
-                        "app_name": self.app.config.get('app_name'),
-                        "username": username,
-                        "confirmation_url": confirmation_url,
-                        "support_url": self.uri_for("contact", _full=True)
-                    }
-                    body_path = "emails/account_activation.txt"
-                    body = self.jinja2.render_template(body_path, **template_val)
-
-                    email_url = self.uri_for('taskqueue-send-email')
-                    taskqueue.add(url = email_url, params={
-                        'to': str(email),
-                        'subject' : subject,
-                        'body' : body,
-                        })
-
-                    message = _('You were successfully registered. '
-                                'Please check your email to activate your account.')
+                    self.send_invite_email(user_info, username, email)
+                    message = _('User successfully invited. '
+                                'They should check their email to activate their account.')
                     self.add_message(message, 'success')
                     return self.redirect_to('home')
 
@@ -986,6 +998,10 @@ class InviteUser(RegisterBaseHandler):
                 message = _('Unexpected error creating the user %s' % username )
                 self.add_message(message, 'error')
                 return self.redirect_to('home')
+
+    @webapp2.cached_property
+    def form(self):
+        return forms.InviteUserForm(self)
 
 class InviteActivationHandler(BaseHandler):
     """
@@ -1008,7 +1024,7 @@ class InviteActivationHandler(BaseHandler):
     def post(self, user_id, token):
 
         if not self.form.validate():
-            return self.get()
+            return self.get(user_id, token)
         password = self.form.password.data.strip()
         name = self.form.name.data.strip()
         last_name = self.form.last_name.data.strip()
@@ -1048,6 +1064,10 @@ class InviteActivationHandler(BaseHandler):
             self.add_message(message, 'error')
             return self.redirect_to('home')
 
+    @webapp2.cached_property
+    def form(self):
+        return forms.InviteActivateForm(self)
+
 class ResendActivationEmailHandler(BaseHandler):
     """
     Handler to resend activation email
@@ -1065,7 +1085,7 @@ class ResendActivationEmailHandler(BaseHandler):
 
             if (user.activated == False):
                 # send email
-                subject = _("%s Account Verification" % self.app.config.get('app_name'))
+                subjectsubject = _("%s Account Verification" % self.app.config.get('app_name'))
                 confirmation_url = self.uri_for("account-activation",
                     user_id = user.get_id(),
                     token = models.User.create_auth_token(user.get_id()),
