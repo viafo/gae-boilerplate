@@ -923,6 +923,7 @@ class InviteUser(BaseHandler):
         template_val = {
             "app_name": self.app.config.get('app_name'),
             "username": username,
+            "email": email,
             "confirmation_url": confirmation_url,
             "support_url": self.uri_for("contact", _full=True)
         }
